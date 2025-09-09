@@ -20,29 +20,11 @@ vim.opt.rtp:prepend(lazypath)
 -- Use Lazy
 -- Setup lazy.nvim
 require('lazy').setup {
-  -- color theme
-  { 'rktjmp/lush.nvim' },
   {
-    'olimorris/onedarkpro.nvim',
-    opts = {
-      options = { cursorline = true },
-    },
-  },
-  { 'rebelot/kanagawa.nvim', opts = { dimInactive = true, undercurl = true } },
-  'folke/tokyonight.nvim',
-  'vague2k/vague.nvim',
-  { 'catppuccin/nvim', name = 'catppuccin', priority = 1000 },
-  -- auto change to dark mode and light mode
-  {
-    'f-person/auto-dark-mode.nvim',
-    opts = {
-      set_dark_mode = function()
-        vim.cmd 'colorscheme kanagawa'
-      end,
-      set_light_mode = function()
-        vim.cmd 'colorscheme kanagawa'
-      end,
-    },
+    'folke/tokyonight.nvim',
+    lazy = false,
+    priority = 1000,
+    opts = {},
   },
   {
     -- syntax highlighting
@@ -53,7 +35,6 @@ require('lazy').setup {
     opts = {
       ensure_installed = {
         'bash',
-        'c',
         'comment',
         'diff',
         'html',
@@ -67,9 +48,8 @@ require('lazy').setup {
         'vim',
         'vimdoc',
         'python',
-        'elixir',
       },
-      -- Autoinstall languages that are not installed
+      -- Auto install languages that are not installed
       auto_install = true,
       highlight = { enable = true },
       indent = { enable = true },
@@ -103,6 +83,7 @@ require('lazy').setup {
   },
   -- show current method or class name when scrolling
   { 'nvim-treesitter/nvim-treesitter-context', opts = { max_lines = 2 } },
+
   -- use mason to install and manage linters, LSPs, DAPs and formatters for vim's LSP
   -- vim's lsp DOESN'T automatically install these, nor does it provide a way to install these
   {
@@ -119,22 +100,39 @@ require('lazy').setup {
       {
         'WhoIsSethDaniel/mason-tool-installer.nvim',
         opts = {
-
           ensure_installed = {
+            -- Bash language server that brings an IDE-like experience for bash scripts
             'bashls',
+            -- Format, lint, and more for JavaScript, TypeScript, JSX, TSX, JSON, HTML, CSS and GraphQL
             'biome',
+            --  Language Server Protocol implementation for CSS, SCSS & LESS
             'cssls',
+            -- An unholy spell checker for code
             'codebook',
+            -- HTML Template Linter and Formatter. Django - Jinja - Nunjucks - Handlebars - GoLang
             'djlint',
+            -- A language server for Docker Compose
             'docker_compose_language_service',
+            -- A language server for emmet.io.
             'emmet_language_server',
+            -- harper-ls is the Language Server Protocol frontend for Harper.
+            -- the Grammar Checker for Developers
             'harper_ls',
+            -- A language server that offers Lua language support - programmed in Lua
             'lua_ls',
+            -- standards-based static type checker for Python
             'pyright',
+            -- An extremely fast Python linter and code formatter, written in Rust
             'ruff',
+            --rust-analyzer is an implementation of the Language Server Protocol for the
+            --Rust programming language. It provides features like completion and goto
+            --definition for many code editors, including VS Code, Emacs and Vim.
             'rust_analyzer',
+            -- An opinionated Lua code formatter
             'stylua',
+            -- An extremely fast Python type checker and language server, written in Rust
             'ty',
+            -- Language Server for YAML Files
             'yamlls',
           },
         },
@@ -689,11 +687,9 @@ vim.o.winborder = 'rounded'
 -- disable autoinsert of first option in menus
 vim.o.completeopt = 'menuone,popup,noinsert'
 
-vim.cmd 'colorscheme onedark_dark'
-
 -- Make line numbers default
 vim.o.number = true
-vim.o.relativenumber = true
+--vim.o.relativenumber = true
 
 -- hide mode as already shown in lualine
 vim.o.showmode = false
@@ -786,7 +782,6 @@ vim.api.nvim_create_user_command('CoffeeShopModeOn', function()
   vim.wo.conceallevel = 2
   vim.wo.concealcursor = 'ni'
 end, { desc = 'Enable CoffeeShop mode: conceal lowercase letters with a bullet' })
-
 -- run replt
 vim.api.nvim_set_keymap('v', '<leader>x', '<Plug>SnipRun', { silent = true })
 vim.api.nvim_set_keymap('n', '<leader>x', '<Plug>SnipRun', { silent = true })
@@ -944,5 +939,6 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   end,
 })
 
+vim.cmd [[colorscheme tokyonight]]
 -- -- The line beneath this is called `modeline`. See `:help modeline`
 -- -- vim: ts=2 sts=2 sw=2 et
