@@ -2,10 +2,125 @@
 -- set it before plugins are loaded (otherwise wrong leader will be used)
 vim.g.mapleader = ' '
 
+local uv = vim.uv or vim.loop
+local data_path = vim.fn.stdpath 'data'
+
+local function ensure_writable_directory(path)
+  if vim.fn.isdirectory(path) == 1 and vim.fn.filewritable(path) == 2 then
+    return path
+  end
+
+  local ok = pcall(vim.fn.mkdir, path, 'p')
+  if ok and vim.fn.isdirectory(path) == 1 and vim.fn.filewritable(path) == 2 then
+    return path
+  end
+end
+
+local function resolve_treesitter_parser_dir()
+  local candidates = {
+    data_path .. '/site',
+    vim.fn.stdpath 'state' .. '/site',
+    vim.fn.stdpath 'cache' .. '/site',
+  }
+
+  for _, candidate in ipairs(candidates) do
+    local writable_dir = ensure_writable_directory(candidate)
+    if writable_dir then
+      return writable_dir
+    end
+  end
+
+  return data_path .. '/site'
+end
+
+local treesitter_parser_dir = resolve_treesitter_parser_dir()
+local treesitter_parsers = {
+  'bash',
+  'c',
+  'comment',
+  'diff',
+  'html',
+  'htmldjango',
+  'lua',
+  'luap',
+  'luadoc',
+  'markdown',
+  'markdown_inline',
+  'query',
+  'vim',
+  'vimdoc',
+  'python',
+  'elixir',
+}
+
+-- Make parser installs available on the runtimepath no matter which writable
+-- stdpath location was selected above.
+vim.opt.runtimepath:append(treesitter_parser_dir)
+
+-- Neovim 0.11 deprecates the table-form `vim.validate({ ... })`, but a number
+-- of plugins still call it. Keep that form working without emitting warnings.
+do
+  local validate = vim.validate
+  local legacy_type_aliases = {
+    b = 'boolean',
+    c = 'callable',
+    f = 'function',
+    n = 'number',
+    s = 'string',
+    t = 'table',
+  }
+
+  local function normalize_validator(validator)
+    if type(validator) == 'string' then
+      return legacy_type_aliases[validator] or validator
+    end
+
+    if type(validator) == 'table' then
+      return vim.tbl_map(normalize_validator, validator)
+    end
+
+    return validator
+  end
+
+  --- @diagnostic disable-next-line: duplicate-set-field
+  function vim.validate(name, value, validator, optional, message)
+    if validator ~= nil or type(name) ~= 'table' then
+      return validate(name, value, validator, optional, message)
+    end
+
+    local keys = vim.tbl_keys(name)
+    table.sort(keys)
+
+    for _, param_name in ipairs(keys) do
+      local spec = name[param_name]
+      if type(spec) ~= 'table' then
+        error(string.format('opt[%s]: expected table, got %s', param_name, type(spec)), 0)
+      end
+
+      local ok, err
+      local validator_spec = normalize_validator(spec[2])
+      local spec_optional = spec[3] == true
+      local spec_message = type(spec[3]) == 'string' and spec[3] or nil
+
+      if spec_optional then
+        ok, err = pcall(validate, param_name, spec[1], validator_spec, true)
+      elseif spec_message then
+        ok, err = pcall(validate, param_name, spec[1], validator_spec, spec_message)
+      else
+        ok, err = pcall(validate, param_name, spec[1], validator_spec)
+      end
+
+      if not ok then
+        error(err, 0)
+      end
+    end
+  end
+end
+
 -- Lazy for plugins
 -- https://lazy.folke.io/installation
-local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'
-if not (vim.uv or vim.loop).fs_stat(lazypath) then
+local lazypath = data_path .. '/lazy/lazy.nvim'
+if not uv.fs_stat(lazypath) then
   vim.fn.system {
     'git',
     'clone',
@@ -19,15 +134,17 @@ vim.opt.rtp:prepend(lazypath)
 
 -- Use Lazy
 -- Setup lazy.nvim
-require('lazy').setup {
-  -- color theme
+require('lazy').setup({
+  -- Theme helper used by some color schemes.
   'https://github.com/rktjmp/lush.nvim',
+  -- Primary One Dark theme.
   {
     'https://github.com/olimorris/onedarkpro.nvim',
     opts = {
       options = { cursorline = true },
     },
   },
+  -- Japanese-inspired theme with custom URL highlight tweaks.
   {
     'https://github.com/rebelot/kanagawa.nvim',
     opts = {
@@ -40,11 +157,15 @@ require('lazy').setup {
       end,
     },
   },
+  -- Alternate Tokyo Night theme.
   'https://github.com/folke/tokyonight.nvim',
+  -- Alternate muted theme.
   'https://github.com/vague2k/vague.nvim',
+  -- Alternate retro warm theme.
   'https://github.com/srcery-colors/srcery-vim',
+  -- Alternate Catppuccin theme collection.
   { 'https://github.com/catppuccin/nvim', name = 'catppuccin', priority = 1000 },
-  -- auto change to dark mode and light mode
+  -- Switch themes automatically based on the OS light/dark mode.
   {
     'f-person/auto-dark-mode.nvim',
     opts = {
@@ -57,32 +178,15 @@ require('lazy').setup {
     },
   },
   {
-    -- syntax highlighting
-    -- https://github.com/nvim-treesitter/nvim-treesitter
+    -- Syntax-aware highlighting, indentation, textobjects and selections.
     'nvim-treesitter/nvim-treesitter',
+    branch = 'master',
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs', -- Sets main module to use for opts
+    main = 'nvim-treesitter.configs',
     opts = {
-      ensure_installed = {
-        'bash',
-        'c',
-        'comment',
-        'diff',
-        'html',
-        'htmldjango',
-        'lua',
-        'luap',
-        'luadoc',
-        'markdown',
-        'markdown_inline',
-        'query',
-        'vim',
-        'vimdoc',
-        'python',
-        'elixir',
-      },
-      -- Auto Install languages that are not installed
-      auto_install = true,
+      parser_install_dir = treesitter_parser_dir,
+      ensure_installed = {},
+      auto_install = false,
       highlight = { enable = true },
       indent = { enable = true },
       -- https://github.com/RRethy/nvim-treesitter-endwise extension
@@ -113,21 +217,18 @@ require('lazy').setup {
       },
     },
   },
-  -- show current method or class name when scrolling
+  -- Keep the current function/class header visible while scrolling.
   { 'nvim-treesitter/nvim-treesitter-context', opts = { max_lines = 2 } },
-  -- use mason to install and manage linters, LSPs, DAPs and formatters for vim's LSP
-  -- vim's lsp doesn't automatically install these, nor does it provide a way to install these
+  -- Install and wire up language servers and external developer tools.
   {
-    -- mason-lspconfig automatically installs the libraries we mention
-    -- plus it automatically calls vim.lsp.enable() on them
+    -- Mason bridges package installation with Neovim's built-in LSP client.
     'mason-org/mason-lspconfig.nvim',
     dependencies = {
-      -- check all available LSPs using `:Mason`
+      -- Package manager UI for LSPs, linters, formatters and DAP tools.
       { 'https://github.com/mason-org/mason.nvim', opts = {} },
+      -- Canonical server configuration definitions for Neovim LSP.
       'https://github.com/neovim/nvim-lspconfig',
-      -- while mason actually installs the binaries for linters
-      -- and nvim-lspconfig configures them
-      -- mason-tool-installer allow us to configure `ensure_installed` so that these are automatically passed to mason for installation
+      -- Ensures the listed tools are installed automatically.
       {
         'https://github.com/WhoIsSethDaniel/mason-tool-installer.nvim',
         opts = {
@@ -158,17 +259,17 @@ require('lazy').setup {
       ensure_installed = {},
     },
   },
-  -- Useful status updates for LSP.
+  -- Show background LSP progress notifications.
   { 'j-hui/fidget.nvim', opts = {} },
-  -- highlight current word (under cursor) using LSP, tree-sitter
+  -- Highlight other occurrences of the symbol under the cursor.
   'https://github.com/RRethy/vim-illuminate',
-  -- snippets
+  -- Snippet engine used by completion and manual snippet expansion.
   {
     'https://github.com/L3MON4D3/LuaSnip',
     -- enable regex support
     build = 'make install_jsregexp',
     dependencies = {
-      -- `friendly-snippets` contains a variety of pre-made snippets
+      -- Loads community snippets plus local snipmate-style snippets.
       {
         'https://github.com/rafamadriz/friendly-snippets',
         config = function()
@@ -179,7 +280,7 @@ require('lazy').setup {
       },
     },
   },
-  -- auto-completion
+  -- Main completion engine for LSP, snippets and paths.
   {
     'https://github.com/saghen/blink.cmp',
     -- requires version setting to download pre-built fuzzy binary
@@ -187,6 +288,7 @@ require('lazy').setup {
     version = '1.*',
     event = 'VimEnter',
     dependencies = {
+      -- Improves Lua completions for Neovim config/plugin development.
       'https://github.com/folke/lazydev.nvim',
     },
     --- @module 'blink.cmp'
@@ -246,18 +348,20 @@ require('lazy').setup {
       signature = { enabled = true },
     },
   },
-  -- Fuzzy Finder (files, lsp, etc)
+  -- Fuzzy finder for files, symbols, grep results and other pickers.
   {
     'nvim-telescope/telescope.nvim',
     branch = 'master',
     event = 'VimEnter',
     dependencies = {
+      -- Lua utility functions used by Telescope and many other plugins.
       'nvim-lua/plenary.nvim',
-      -- use telescope for vim.ui.select
+      -- Replaces `vim.ui.select` prompts with Telescope pickers.
       'nvim-telescope/telescope-ui-select.nvim',
-      -- use nerd font
+      -- Filetype icons in Telescope and the statusline.
       'nvim-tree/nvim-web-devicons',
       {
+        -- Native sorter for faster Telescope matching.
         'nvim-telescope/telescope-fzf-native.nvim',
         -- `build` is run only once. When the plugin is installed/updated.
         build = 'make',
@@ -278,7 +382,7 @@ require('lazy').setup {
       require('telescope').load_extension 'ui-select'
     end,
   },
-  -- GIT changes: `:help gitsigns`
+  -- Show git hunks in the signcolumn and expose hunk actions.
   {
     'https://github.com/lewis6991/gitsigns.nvim',
     opts = {
@@ -291,32 +395,32 @@ require('lazy').setup {
       },
     },
   },
-  -- auto pair brackets and quotes
+  -- Auto-insert matching brackets and quotes while typing.
   { 'https://github.com/windwp/nvim-autopairs', event = 'InsertEnter', opts = { check_ts = true } },
-  -- add quotes around selected text
+  -- Add/change/delete surrounding quotes, brackets and tags.
   { 'https://github.com/echasnovski/mini.surround', version = false, opts = {} },
-  -- auto close functions
+  -- Auto-insert `end`/language-specific closing keywords using Treesitter.
   'https://github.com/RRethy/nvim-treesitter-endwise',
-  -- configure jumps on [[, ]], ]m, [m - for all languages
-  -- configured via textobjects in treesitter
+  -- Adds syntax-aware textobjects and motions for Treesitter nodes.
   'nvim-treesitter/nvim-treesitter-textobjects',
-  -- auto close tags in html
+  -- Auto-close and rename HTML/JSX tags.
   { 'https://github.com/windwp/nvim-ts-autotag', opts = {} },
-  -- multi cursor
+  -- Multiple cursors for editing repeated matches at once.
   'mg979/vim-visual-multi',
-  -- create file on :e
+  -- Allows `:e path/to/file` to create missing files on demand.
   'https://github.com/jessarcher/vim-heritage',
-  -- managing files
+  -- File explorer/editing interface that treats directories like buffers.
   {
     'https://github.com/stevearc/oil.nvim',
     opts = {},
+    -- Lightweight icon provider used by Oil.
     dependencies = { { 'https://github.com/echasnovski/mini.icons', opts = {} } },
   },
-  -- detect tab width automatically based on current file and editorconfig
+  -- Detect indentation settings from the current file and EditorConfig.
   'https://github.com/tpope/vim-sleuth',
-  -- show indent lines
+  -- Draw indentation guides to show nesting depth.
   { 'https://github.com/lukas-reineke/indent-blankline.nvim', main = 'ibl', opts = {} },
-  -- auto format on save
+  -- Run formatters on save with LSP fallback when needed.
   {
     'https://github.com/stevearc/conform.nvim',
     config = function()
@@ -325,9 +429,8 @@ require('lazy').setup {
           -- we need to install these using :MasonInstall
           -- we have fallback for lsp below. Hence need these only when the lsp doesn't do formatting
           lua = { 'stylua' },
-          -- Conform will run the first available formatter
-          html = { 'djlint', 'prettierd', 'prettier', stop_after_first = true },
-          css = { 'biome', 'prettier', stop_after_first = true },
+          html = { 'djlint' },
+          css = { 'biome' },
           htmldjango = { 'djlint' },
           python = { 'ruff_fix', 'ruff_organize_imports', 'ruff_format' },
         },
@@ -353,7 +456,7 @@ require('lazy').setup {
       }
     end,
   },
-  -- make key-bindings easier to see which whichkey
+  -- Popup that documents available keybindings as you type prefixes.
   {
     'https://github.com/folke/which-key.nvim',
     event = 'VimEnter', -- Sets the loading event to 'VimEnter'
@@ -365,7 +468,6 @@ require('lazy').setup {
         { '<leader>b', group = '[B]uffer' },
         { '<leader>c', group = '[C]ode', mode = { 'n', 'x' } },
         { '<leader>d', group = '[D]ocument' },
-        { '<leader>o', group = '[O]rg mode' },
         { '<leader>r', group = '[R]ename' },
         { '<leader>s', group = '[S]earch' },
         { '<leader>w', group = '[W]orkspace' },
@@ -373,14 +475,28 @@ require('lazy').setup {
       },
     },
   },
-  -- Highlight todo, notes, etc in comments
+  -- Highlight TODO/FIXME/NOTE style comments.
   { 'https://github.com/folke/todo-comments.nvim', event = 'VimEnter', dependencies = { 'nvim-lua/plenary.nvim' }, opts = { signs = false } },
-  -- better dialogs
+  -- Improved UI for input/select prompts.
   { 'https://github.com/stevearc/dressing.nvim', opts = {} },
-  -- CodeCompanion for ai
+  -- AI assistant integration for chat, inline edits and command actions.
   {
     'https://github.com/pratyushmittal/codecompanion.nvim',
     branch = 'tab-autocomplete',
+    cmd = {
+      'CodeCompanion',
+      'CodeCompanionActions',
+      'CodeCompanionChat',
+      'CodeCompanionCmd',
+      'CodeCompanionComplete',
+    },
+    keys = {
+      { '<leader>aa', '<cmd>CodeCompanionActions<cr>', mode = { 'n', 'v' }, desc = '[A]ctions' },
+      { '<leader>ac', '<cmd>CodeCompanionChat<cr>', mode = { 'n', 'v' }, desc = '[C]hat' },
+      { '<leader>at', '<cmd>CodeCompanionChat Toggle<cr>', mode = { 'n', 'v' }, desc = '[T]oggle' },
+      { '<C-f>', '<cmd>CodeCompanionComplete<cr>', mode = 'i', desc = 'Complete [F]orward' },
+      { '<leader>ae', ":'<,'>CodeCompanion #buffer ", mode = 'v', desc = '[E]dit' },
+    },
     opts = {
       prompt_library = require 'prompts',
       strategies = {
@@ -404,17 +520,20 @@ require('lazy').setup {
         },
       },
       opts = {
-        log_level = 'DEBUG',
+        log_level = 'ERROR',
       },
     },
     dependencies = {
+      -- Shared Lua helpers used by CodeCompanion.
       'nvim-lua/plenary.nvim',
+      -- Syntax tree support for buffer-aware AI actions.
       'nvim-treesitter/nvim-treesitter',
     },
   },
-  -- statusline
+  -- Statusline showing filename, diff, diagnostics and filetype.
   {
     'https://github.com/nvim-lualine/lualine.nvim',
+    -- Optional filetype icons in the statusline.
     dependencies = { 'nvim-tree/nvim-web-devicons' },
     opts = {
       sections = {
@@ -425,7 +544,7 @@ require('lazy').setup {
       },
     },
   },
-  -- floating terminal
+  -- Toggleable floating terminal for shell commands and tools.
   {
     'https://github.com/akinsho/toggleterm.nvim',
     version = '*',
@@ -452,13 +571,13 @@ require('lazy').setup {
       },
     },
   },
-  -- disable LSP and treesitter for big files over 2mb
+  -- Disables expensive features automatically for very large files.
   { 'https://github.com/LunarVim/bigfile.nvim', opts = {} },
-  -- retain layout on :bd
+  -- Delete buffers without breaking the current window layout.
   'https://github.com/famiu/bufdelete.nvim',
-  -- run tests
+  -- Run project tests from inside Neovim.
   'https://github.com/vim-test/vim-test',
-  -- run code repl
+  -- Execute code snippets or the current file and show the output inline.
   {
     'https://github.com/michaelb/sniprun',
     branch = 'master',
@@ -467,19 +586,18 @@ require('lazy').setup {
     -- (instead of fetching a binary from the github release). Requires Rust >= 1.65
     opts = {},
   },
-  -- insert log lines automatically
+  -- Generate language-aware log statements quickly.
   {
     'https://github.com/Goose97/timber.nvim',
     version = '*', -- Use for stability; omit to use `main` branch for the latest features
     event = 'VeryLazy',
     opts = {},
   },
-  -- search and execute commands
+  -- Search cheat sheets and available command references.
   { 'https://github.com/doctorfree/cheatsheet.nvim', opts = { bundled_cheatsheets = { disabled = { 'nerd-fonts' } } } },
-  -- lsp supported code completions in markdown and other embeds
-  -- need to call :OtterActivate to enable
+  -- Enable LSP/completion inside fenced code blocks in markdown-like files.
   { 'https://github.com/jmbuhr/otter.nvim', opts = {} },
-  -- jumping between neighbors
+  -- Navigate between neighboring syntax tree nodes instead of plain text.
   {
     'https://github.com/aaronik/treewalker.nvim',
 
@@ -498,33 +616,11 @@ require('lazy').setup {
       highlight_group = 'CursorLine',
     },
   },
-  -- Detect tabstop and shiftwidth automatically
+  -- Another indentation detector; useful when heuristics differ from sleuth.
   'https://github.com/NMAC427/guess-indent.nvim',
-  -- org mode and todo
+  -- Lua development helpers for editing your Neovim config itself.
   {
-    'nvim-orgmode/orgmode',
-    event = 'VeryLazy',
-    config = function()
-      -- Setup orgmode
-      require('orgmode').setup(require 'orgmode-config')
-    end,
-  },
-  {
-    'nvim-orgmode/telescope-orgmode.nvim',
-    event = 'VeryLazy',
-    dependencies = {
-      'nvim-orgmode/orgmode',
-      'nvim-telescope/telescope.nvim',
-    },
-    config = function()
-      require('telescope').load_extension 'orgmode'
-      vim.keymap.set('n', '<leader>so', require('telescope').extensions.orgmode.search_headings)
-    end,
-  },
-  -- LSP Plugins
-  {
-    -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
-    -- used for completion, annotations and signatures of Neovim apis
+    -- Adds Neovim runtime/library types so `lua_ls` understands `vim.*`.
     'https://github.com/folke/lazydev.nvim',
     ft = 'lua',
     opts = {
@@ -534,12 +630,20 @@ require('lazy').setup {
       },
     },
   },
-}
+}, {
+  rocks = {
+    enabled = false,
+    hererocks = false,
+  },
+})
 
+-- Share completion capabilities with all language servers.
 -- LSP for linting, definition, references, symbols
 -- local capabilities = vim.lsp.protocol.make_client_capabilities()
 local capabilities = require('blink.cmp').get_lsp_capabilities()
+-- Python linter/fixer server.
 vim.lsp.config('ruff', { capabilities = capabilities, offset_encoding = 'utf-8' })
+-- Rust language server with proc-macro exclusions for specific macros.
 vim.lsp.config('rust_analyzer', {
   capabilities = capabilities,
   settings = {
@@ -557,6 +661,7 @@ vim.lsp.config('rust_analyzer', {
   },
 })
 
+-- CSS language server with stricter duplicate property warnings.
 vim.lsp.config('cssls', {
   capabilities = capabilities,
   settings = {
@@ -566,11 +671,17 @@ vim.lsp.config('cssls', {
     },
   },
 })
+-- YAML language server.
 vim.lsp.config('yamlls', { capabilities = capabilities })
+-- Biome language server for JS/CSS/web tooling.
 vim.lsp.config('biome', { capabilities = capabilities })
+-- TypeScript language server.
 vim.lsp.config('ts_ls', { capabilities = capabilities })
+-- Emmet abbreviations for HTML/CSS-like filetypes.
 vim.lsp.config('emmet_language_server', { capabilities = capabilities })
+-- Astro framework language server.
 vim.lsp.config('astro', { capabilities = capabilities })
+-- Lua language server tuned for Neovim config development.
 vim.lsp.config('lua_ls', {
   capabilities = capabilities,
 
@@ -583,10 +694,10 @@ vim.lsp.config('lua_ls', {
     },
   },
 })
+-- Docker Compose language server.
 vim.lsp.config('docker_compose_language_service', { capabilities = capabilities })
-vim.lsp.config('org', { capabilities = capabilities })
-vim.lsp.enable 'org'
 
+-- Python type checker / analyzer with auto-import support.
 vim.lsp.config(
   'ty',
   { capabilities = capabilities, offset_encoding = 'utf-8', settings = {
@@ -597,6 +708,7 @@ vim.lsp.config(
     },
   } }
 )
+-- Prose and grammar checker for text-heavy filetypes.
 vim.lsp.config('harper_ls', {
   capabilities = capabilities,
   filetypes = {
@@ -746,7 +858,7 @@ vim.o.confirm = true
 
 -- Use treesitter for folding
 vim.o.foldmethod = 'expr'
-vim.o.foldexpr = 'nvim_treesitter#foldexpr()'
+vim.o.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
 vim.o.foldlevelstart = 99
 
 -- KEY BINDINGS
@@ -757,84 +869,6 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 vim.keymap.set('n', '<leader>bp', ':bp<CR>', { desc = '[B]uffer [P]revious' })
 vim.keymap.set('n', '<leader>bn', ':bn<CR>', { desc = '[B]uffer [N]ext' })
 vim.keymap.set('n', '<leader>bd', ':Bdelete<CR>', { desc = '[B]uffer [D]elete' })
-
-local function get_active_org_clock_title()
-  local ok, orgmode = pcall(require, 'orgmode')
-  if not ok or not orgmode.files then
-    return nil
-  end
-
-  local headline = orgmode.files:get_clocked_headline()
-  if not headline then
-    return nil
-  end
-
-  local todo = headline:get_todo()
-  local title = headline:get_title()
-  local category = headline:get_category()
-  local todo_text = todo and (todo .. ' ') or ''
-  local category_text = category and category ~= '' and (' [' .. category .. ']') or ''
-
-  return string.format('%s%s%s', todo_text, title, category_text)
-end
-
-local function toggle_current_task_today_deadline()
-  local orgmode = require 'orgmode'
-  local Date = require 'orgmode.objects.date'
-  local headline = orgmode.agenda:get_headline_at_cursor()
-
-  if not headline then
-    return vim.notify('No agenda task selected', vim.log.levels.INFO, { title = 'Org Agenda' })
-  end
-
-  local has_deadline = headline:get_deadline_date() ~= nil
-
-  headline.file
-    :update(function()
-      if has_deadline then
-        return headline:remove_deadline_date()
-      end
-      return headline:set_deadline_date(Date.today())
-    end)
-    :next(function()
-      return orgmode.agenda:redo('mapping', true)
-    end)
-    :next(function()
-      local message = has_deadline and 'Task deadline removed' or 'Task deadline set to today'
-      vim.notify(message, vim.log.levels.INFO, { title = 'Org Agenda' })
-    end)
-    :catch(function(err)
-      vim.notify('Failed to toggle deadline: ' .. tostring(err), vim.log.levels.ERROR, { title = 'Org Agenda' })
-    end)
-end
-
--- orgmode quick actions
-vim.keymap.set('n', '<leader>ow', function()
-  local active = get_active_org_clock_title()
-  if not active then
-    return vim.notify('No active Org clock', vim.log.levels.INFO, { title = 'Orgmode' })
-  end
-  vim.notify('Working on: ' .. active, vim.log.levels.INFO, { title = 'Orgmode' })
-end, { desc = '[O]rg [W]orking task' })
-
-vim.keymap.set('n', '<leader>oj', function()
-  require('orgmode').action 'clock.org_clock_goto'
-end, { desc = '[O]rg [J]ump to active task' })
-
-vim.keymap.set('n', '<leader>oi', function()
-  require('orgmode').action('agenda.open_by_key', 'r')
-end, { desc = '[O]rg Refile [I]nbox' })
-
-vim.keymap.set('n', '<leader>ot', function()
-  require('orgmode').action('agenda.open_by_key', 't')
-end, { desc = '[O]rg [T]asks' })
-
--- ai codecompanion
-vim.keymap.set({ 'n', 'v' }, '<leader>aa', '<cmd>CodeCompanionActions<cr>', { noremap = true, silent = true, desc = '[A]ctions' })
-vim.keymap.set({ 'n', 'v' }, '<leader>ac', '<cmd>CodeCompanionChat<cr>', { noremap = true, silent = true, desc = '[C]hat' })
-vim.keymap.set({ 'n', 'v' }, '<leader>at', '<cmd>CodeCompanionChat Toggle<cr>', { noremap = true, silent = true, desc = '[T]oggle' })
-vim.keymap.set({ 'i' }, '<C-f>', '<cmd>CodeCompanionComplete<cr>', { noremap = true, silent = true, desc = 'Complete [F]orward' })
-vim.keymap.set({ 'n', 'v' }, '<leader>ae', ":'<,'>CodeCompanion #buffer ", { noremap = true, silent = true, desc = '[E]dit' })
 
 -- CoffeeShop mode
 -- use CoffeeShop mode to hide what we type in public places
@@ -926,10 +960,6 @@ vim.keymap.set('n', '<leader>sn', function()
   builtin.find_files { cwd = vim.fn.stdpath 'config' }
 end, { desc = '[S]earch [N]eovim files' })
 
-vim.keymap.set('n', '<leader>sm', function()
-  builtin.find_files { cwd = '/Users/pratyush/Websites/mapl-soft-org' }
-end, { desc = '[S]earch [M]apl-soft files' })
-
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
@@ -985,33 +1015,6 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   end,
 })
 
--- show currently working on whenever we open agenda window
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'orgagenda',
-  callback = function(args)
-    vim.keymap.set('n', '1', function()
-      require('orgmode').action('agenda.open_by_key', 't')
-    end, { buffer = args.buf, silent = true, desc = 'Org tasks: clear filters' })
-    vim.keymap.set('n', '2', function()
-      require('orgmode').action('agenda.open_by_key', '2')
-    end, { buffer = args.buf, silent = true, desc = 'Org tasks: due in next 6 weeks' })
-    vim.keymap.set('n', '3', function()
-      require('orgmode').action('agenda.open_by_key', '3')
-    end, { buffer = args.buf, silent = true, desc = 'Org tasks: without deadline' })
-    vim.keymap.set('n', 'A', function()
-      toggle_current_task_today_deadline()
-    end, { buffer = args.buf, silent = true, desc = 'Org tasks: [A]dd/remove today deadline' })
-
-    local active = get_active_org_clock_title()
-    if not active then
-      return
-    end
-    vim.schedule(function()
-      vim.notify('Working on: ' .. active, vim.log.levels.INFO, { title = 'Org Agenda' })
-    end)
-  end,
-})
-
 -- Add commands to disable and enable Conform if needed
 vim.api.nvim_create_user_command('ConformDisable', function(args)
   if args.bang then
@@ -1029,6 +1032,12 @@ vim.api.nvim_create_user_command('ConformEnable', function()
   vim.g.disable_autoformat = false
 end, {
   desc = 'Re-enable autoformat-on-save',
+})
+
+vim.api.nvim_create_user_command('TSInstallRequired', function()
+  require('nvim-treesitter.install').ensure_installed(treesitter_parsers)
+end, {
+  desc = 'Install the Treesitter parsers managed by this config',
 })
 
 -- Treat .jrnl file as markdown
